@@ -100,6 +100,54 @@ Security note:
 Create a per‑run output folder:
 - `export OUTDIR="runs/$(date +%Y%m%d_%H%M%S)"`
 - `mkdir -p "$OUTDIR"`
+- `mkdir -p "$OUTDIR/artifacts" "$OUTDIR/results"`
+
+### Experiment 0a — Pin HF revisions + file manifests (repro hygiene)
+
+Goal: make every run reproducible by recording the exact HF commit SHA and file listing (names/sizes/LFS hashes if available).
+
+Run (requires HF access):
+```bash
+python - <<'PY' > "$OUTDIR/artifacts/manifest.json"
+from huggingface_hub import HfApi
+import json
+
+api = HfApi()
+repos = ["upstage/Solar-Open-100B", "zai-org/GLM-4.5-Air"]
+out = {}
+for repo in repos:
+    info = api.model_info(repo)
+    out[repo] = {
+        "sha": getattr(info, "sha", None),
+        "siblings": [
+            {
+                "rfilename": s.rfilename,
+                "size": getattr(s, "size", None),
+                "lfs": getattr(s, "lfs", None),
+            }
+            for s in getattr(info, "siblings", [])
+        ],
+    }
+print(json.dumps(out, indent=2))
+PY
+```
+
+Notes:
+- If either repo is gated, you may need `HF_TOKEN=...` or `huggingface-cli login` first.
+- Prefer running the rest of the plan against pinned SHAs (instead of `main`) once you have them.
+  - Many scripts accept a revision flag (e.g. `probe_solar_vs_glm45_air.py --revision ...`, `compare_embeddings.py --rev_solar/--rev_glm ...`); some may need small edits to stop hardcoding `main`.
+
+### Experiment 0b — (Optional) Build a tensor inventory (headers only)
+
+Goal: enumerate every tensor key + dtype + shape + shard (+ byte offsets if available) so we can:
+- know exactly what is shape‑comparable
+- run systematic exact‑match and similarity scans without hand‑curating tensor names
+
+Approach:
+- For each shard listed in `model.safetensors.index.json`, fetch and parse the safetensors header (no full tensor downloads).
+- Save a table (CSV/Parquet) under `"$OUTDIR/results/"`.
+
+This requires “our own harness” code (see section 6); the existing probe scripts are targeted, not exhaustive.
 
 ### Experiment 0 — Sanity: config + tokenizer diff
 
@@ -179,6 +227,9 @@ Then improve it (recommended):
 - expand beyond “first 20 tensors”
 - test multiple random contiguous byte blocks for each candidate tensor
 - cover more tensor families with identical shapes (norms, router weights, biases, etc.)
+- Use a tiered approach to keep bandwidth reasonable:
+  - Tier 1: sample many deterministic blocks per tensor (fixed seed) and compare for exact equality (raw BF16 bytes or decoded values).
+  - Tier 2: if Tier 1 finds any hits, hash the entire tensor (only for small/medium tensors; otherwise stream-hash in chunks).
 - Optional “outlier fingerprint” (useful if you want a human‑interpretable hard signal):
   - For a given GLM LayerNorm vector, find the top‑K most extreme coordinates (largest `abs(x-mean)`).
   - Check whether Solar’s corresponding vector has the **same BF16 values at the same indices** across multiple layers.
@@ -202,7 +253,8 @@ Ways to do it:
 Quantify it (useful “Claude plan” additions):
 - **Alignment rate**: fraction of Solar layers whose best match is GLM layer `L` (account for Solar’s extra +2 layers).
 - **Margin**: `(best_sim - second_best_sim)` per Solar layer; small margins indicate “everything is similar”.
- - Save a heatmap (e.g. `similarity_heatmap.png`) so “sharp diagonal vs diffuse cloud” is visually obvious.
+- Save a heatmap (e.g. `similarity_heatmap.png`) so “sharp diagonal vs diffuse cloud” is visually obvious.
+- Optional significance check: shuffle GLM layer labels and recompute alignment rate/margins to estimate “by chance” expectations.
 
 Expected outcomes:
 - If Solar was initialized layer‑wise from GLM, argmax should concentrate strongly on the diagonal (after accounting for Solar’s extra +2 layers).
@@ -254,12 +306,15 @@ The existing scripts are a good start, but to settle disputes cleanly we should 
 
 Minimal starting scripts to add:
 - `scripts/fetch_tensor.py` (index→shard→header→Range fetch; plus local safetensors path mode)
+- `scripts/build_tensor_inventory.py` (walk all shards, parse headers, write `{name,dtype,shape,shard,offsets,bytes}` inventory)
 - `scripts/norm_baselines.py` (baseline distributions + layer alignment matrix across Solar/GLM/Phi)
 - `scripts/byte_match.py` (hash random byte blocks for many tensors)
   - Include: alignment rate + per‑layer margin, plus value‑difference stats (MAD/RMSE/max/percent‑close).
+  - Include: Tier‑1 sampled block matching + Tier‑2 full/stream hash escalation.
 - Optional add-ons (useful, but not required to start):
   - `scripts/outlier_fingerprint.py` (find extreme coordinates in GLM vectors and test exact index/value matches in Solar)
   - `scripts/norm_dynamics.py` (per‑layer weight‑norm “curve” plots for shape‑compatible tensors)
+  - `scripts/expert_permutation.py` (if/when expert tensors are shape‑compatible: Hungarian assignment to compare experts permutation‑invariantly)
 
 ---
 
@@ -288,3 +343,4 @@ Quick decision tree (optional shorthand):
 - Don’t build statistical claims on a single baseline like “layer 0 vs layer 10”; use distributions.
 - Record exactly which tensors and which slices/windows were compared.
 - Keep “architecture similarity” separate from “weight reuse”; similar configs are not proof.
+- Don’t redistribute weights; publish only aggregate stats, hashes, and non‑reconstructive samples.
