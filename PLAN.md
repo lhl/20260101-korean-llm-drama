@@ -63,7 +63,7 @@ Avoid `transformers` full loads unless you have serious hardware/offloading.
 
 ### Range‑based probing (recommended)
 - CPU: OK
-- RAM: **8–16GB** recommended (headers can be cached; worst case is larger)
+- RAM: **8–16GB** is usually enough for the included probes; plan for **~32GB** if you build full layer×layer matrices and cache many tensors/headers.
 - Disk: typically **< 2GB** (HF cache + outputs)
 - Network: expect **tens to a few hundred MB** for the basic probes; more if you add many large tensor samples
 
@@ -82,6 +82,7 @@ Avoid `transformers` full loads unless you have serious hardware/offloading.
 2. Install deps for range workflow:
    - `pip install huggingface_hub requests numpy matplotlib scipy pandas`
    - `scipy` is optional but enables Hungarian alignment in some scripts.
+   - If you do the offline (downloaded shards) path: `pip install safetensors`.
 
 3. HF access:
    - Accept model terms on Hugging Face for each gated repo.
@@ -143,6 +144,9 @@ Run:
 Then:
 - Compare **raw cosine** vs **pearson** vs **centered cosine** (see `probe_final.py`).
 - Compute a *distribution* baseline (many random layer pairs), not a single “layer 0 vs layer 10” number.
+- If you extend this yourself, capture **within‑model** layer×layer matrices for both:
+  - `input_layernorm.weight`
+  - `post_attention_layernorm.weight`
 
 If this still isn’t enough, write a small dedicated baseline script (recommended next code to write; see section 6).
 
@@ -172,6 +176,10 @@ Ways to do it:
   - raw cosine
   - pearson / centered cosine
   - mean absolute difference
+
+Quantify it (useful “Claude plan” additions):
+- **Alignment rate**: fraction of Solar layers whose best match is GLM layer `L` (account for Solar’s extra +2 layers).
+- **Margin**: `(best_sim - second_best_sim)` per Solar layer; small margins indicate “everything is similar”.
 
 Expected outcomes:
 - If Solar was initialized layer‑wise from GLM, argmax should concentrate strongly on the diagonal (after accounting for Solar’s extra +2 layers).
@@ -222,6 +230,7 @@ Minimal starting scripts to add:
 - `scripts/fetch_tensor.py` (index→shard→header→Range fetch; plus local safetensors path mode)
 - `scripts/norm_baselines.py` (baseline distributions + layer alignment matrix across Solar/GLM/Phi)
 - `scripts/byte_match.py` (hash random byte blocks for many tensors)
+  - Include: alignment rate + per‑layer margin, plus value‑difference stats (MAD/RMSE/max/percent‑close).
 
 ---
 
@@ -236,6 +245,11 @@ Likely **inconclusive / weak evidence**:
 
 High confidence **not supported by weights**:
 - no meaningful alignment beyond what controls show, and no byte‑identity evidence, across a broad tensor suite.
+
+Quick decision tree (optional shorthand):
+- If within‑model norms are already ~0.9 cosine and cross‑model is also ~0.9, cosine is not discriminative → rely on centered/pearson + higher‑dim tensors.
+- If argmax alignment is near‑diagonal with meaningful margins on informative tensors → evidence for derivation/initialization.
+- If repeated byte‑block matches occur → very strong evidence of reuse.
 
 ---
 
