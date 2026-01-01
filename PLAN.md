@@ -149,6 +149,19 @@ Approach:
 
 This requires “our own harness” code (see section 6); the existing probe scripts are targeted, not exhaustive.
 
+### Experiment 0c — (Optional) Model code lineage diff (remote code)
+
+Goal: identify obvious codebase reuse signals (copy/paste, identical helper logic, vestigial features) without running any untrusted code.
+
+Approach:
+- Download only the small text artifacts from each HF repo (no weights), e.g.:
+  - `modeling_*.py`, `configuration_*.py`, `tokenization_*.py`, `generation_config.json`, `README.md`, `LICENSE`
+- Run a plain-text diff and/or similarity scan.
+
+Notes:
+- This is **not** proof of weight reuse, but it can corroborate “derived implementation lineage”.
+- Do **not** execute downloaded code; treat it as data.
+
 ### Experiment 0 — Sanity: config + tokenizer diff
 
 Run:
@@ -164,6 +177,9 @@ Checklist:
 - Scan for “lineage breadcrumbs” in `00_config_compare.json`:
   - GLM‑specific fields present/absent (e.g. `num_nextn_predict_layers`)
   - closely related flags with different values (e.g. `partial_rotary_factor`, `first_k_dense_replace`)
+- In `model.safetensors.index.json` (or your tensor inventory), scan key names for distinctive architectural artifacts:
+  - attention bias tensors (`q_proj.bias`, `k_proj.bias`, `v_proj.bias`) if present
+  - next‑token prediction / MTP remnants (`nextn`, `mtp`, etc.) if present
 - In `01_tokenizer_compare.json`, explicitly check tokenizer *ID* behavior (this determines whether any row‑wise embedding comparisons are meaningful):
   - `same_id_exact_matches.ratio` (are IDs preserved at all?)
   - `best_ascii_offset` + `best_offset_longest_contiguous_run.run_len` (is Solar largely a shifted/permuted GLM vocab?)
@@ -286,6 +302,82 @@ If you *do* run the rebuttal script anyway:
 - expect it to require extremely large resources, or `accelerate` offload configuration
 - treat remote code execution risk accordingly
 
+### Experiment 7 — Intrinsic “std‑curve” fingerprint (LLM‑Fingerprint style)
+
+This is a different forensic angle than “are the weights close”: compare **layer‑wise parameter statistics** that tend to persist through continued training.
+
+Source inspiration:
+- `LLM-Fingerprint2/README.md` (“Intrinsic Fingerprint of LLMs…”, std patterns across attention parameters)
+
+Goal:
+- Compute a per‑layer signature like `std(W)` for selected tensor families and compare the **shape of the curve** across models.
+
+What to compute (pick shape‑compatible tensors first):
+- Attention `k_proj.weight` and `v_proj.weight` (Solar/GLM shapes match: `1024×4096`)
+- MoE router/gate `mlp.gate.weight` (Solar/GLM shapes match: `128×4096`)
+- Norm vectors (`input_layernorm.weight`, `post_attention_layernorm.weight`) as a low‑information reference
+ - If you want to follow the paper more literally: compute attention Q/K/V/O std curves; in Solar vs GLM, Q/O are shape‑mismatched (head count), so treat Q/O as “optional/approx” (e.g., truncation to a common submatrix).
+
+How:
+- For each layer `L`, estimate:
+  - `std(W_L)` (and optionally mean, skew/kurtosis, quantiles)
+  - Normalize the resulting vector across layers (e.g., z‑score or min‑max) before comparing models.
+- Compare Solar vs GLM with:
+  - correlation (`pearsonr`) across layers
+  - handle layer count mismatch (48 vs 46) by interpolating the shorter curve to the longer length (the LLM‑Fingerprint paper uses linear interpolation), or use DTW if you suspect insertions/shifts
+- Always compare against at least one unrelated control model to calibrate “how similar is typical”.
+
+Interpretation:
+- High curve correlation is **supporting evidence** of lineage/recipe similarity, but not “smoking gun” on its own (many models can share training heuristics).
+
+### Experiment 8 — Weight‑matrix fingerprint via CKA + LAP (AWM‑style)
+
+This targets a more robust, model‑agnostic similarity metric than raw cosine on flattened tensors.
+
+Source:
+- `AWM/README.md` + `AWM/similarity_metrics.py` (CKA on attention weights + LAP alignment)
+
+Goal:
+- Compute centered kernel alignment (CKA) similarities between matched weight matrices, and optionally use LAP to align layers (and/or experts) when counts differ.
+
+Practical adaptation for Solar vs GLM:
+- AWM’s reference implementation expects **local full checkpoints** (loads full state dicts) → not realistic for 200GB‑class weights unless you’ve already downloaded them.
+- Implement a *streaming* variant in our harness:
+  - fetch only the tensors needed (Range or local safetensors)
+  - compute **linear CKA** for matrices where shapes match (`k_proj`, `v_proj`, `mlp.gate`)
+  - optionally do **LAP layer matching** using a CKA‑based cost matrix (similar to what AWM does)
+
+Interpretation:
+- Consistently high CKA on informative matrices (and diagonal‑dominant layer matching with margins) is stronger evidence than LayerNorm cosine alone.
+
+### Experiment 9 — Black‑box / behavioral fingerprinting (optional, if you can run inference)
+
+Weight forensics is best here, but black‑box methods are useful if:
+- you only have API access, or
+- you suspect **distillation** rather than direct weight reuse.
+
+Source index:
+- `Awesome-LLM-Fingerprinting/README.md` (SoK paper list; black‑box/side‑channel categories)
+
+Possible avenues (pick based on what access you have):
+- **Model equality testing / MMD** on response token sequences (requires many prompts; ideally logprobs or deterministic decoding).
+- **LLMmap‑style** behavioral maps from curated prompts (requires consistent decoding settings).
+- **N‑gram / stylistic classifiers** over many generations (weaker evidence; sensitive to prompting/decoding).
+
+Practical note:
+- For 100B‑class models you likely need hosted inference; bake “prompt set + decoding params + seed” into the run artifact so results are reproducible.
+
+### Experiment 10 — Forward‑pass / representation fingerprints (optional)
+
+If you can run forward passes (local GPU, heavy CPU offload, or a provider that exposes hidden states/logprobs), you can use forward‑pass fingerprints from the SoK list:
+- intermediate activation statistics (layerwise norms/variances)
+- representation encoding fingerprints (e.g., REEF‑style)
+- simple linear probes on intermediate features (EasyDetector‑style)
+
+Practical constraints for Solar/GLM:
+- Running 100B‑class forward passes locally is usually unrealistic; treat this as an “if hardware/hosted access exists” add‑on.
+- Tokenizers differ substantially; prefer aggregation stats (per‑layer norms over many tokens) rather than attempting token‑level alignment.
+
 ---
 
 ## 6) Code we likely need to write (to make this “our own testing”)
@@ -308,6 +400,8 @@ Minimal starting scripts to add:
 - `scripts/fetch_tensor.py` (index→shard→header→Range fetch; plus local safetensors path mode)
 - `scripts/build_tensor_inventory.py` (walk all shards, parse headers, write `{name,dtype,shape,shard,offsets,bytes}` inventory)
 - `scripts/norm_baselines.py` (baseline distributions + layer alignment matrix across Solar/GLM/Phi)
+- `scripts/std_fingerprint.py` (LLM‑Fingerprint‑style layerwise `std(W)` curves + correlations + control baselines)
+- `scripts/cka_fingerprint.py` (AWM‑style linear CKA on matched matrices + optional LAP layer alignment)
 - `scripts/byte_match.py` (hash random byte blocks for many tensors)
   - Include: alignment rate + per‑layer margin, plus value‑difference stats (MAD/RMSE/max/percent‑close).
   - Include: Tier‑1 sampled block matching + Tier‑2 full/stream hash escalation.
@@ -315,6 +409,7 @@ Minimal starting scripts to add:
   - `scripts/outlier_fingerprint.py` (find extreme coordinates in GLM vectors and test exact index/value matches in Solar)
   - `scripts/norm_dynamics.py` (per‑layer weight‑norm “curve” plots for shape‑compatible tensors)
   - `scripts/expert_permutation.py` (if/when expert tensors are shape‑compatible: Hungarian assignment to compare experts permutation‑invariantly)
+  - `scripts/behavior_fingerprint.py` (prompt set runner + output similarity metrics, if inference access exists)
 
 ---
 
@@ -326,6 +421,7 @@ High confidence **derived/reused**:
 
 Likely **inconclusive / weak evidence**:
 - only LayerNorm cosine is high, but centered/pearson metrics and control models show similar behavior.
+- only “curve similarity” (std/norm dynamics) is high without any harder signals (byte matches, alignment on informative tensors).
 
 High confidence **not supported by weights**:
 - no meaningful alignment beyond what controls show, and no byte‑identity evidence, across a broad tensor suite.
@@ -344,3 +440,4 @@ Quick decision tree (optional shorthand):
 - Record exactly which tensors and which slices/windows were compared.
 - Keep “architecture similarity” separate from “weight reuse”; similar configs are not proof.
 - Don’t redistribute weights; publish only aggregate stats, hashes, and non‑reconstructive samples.
+- Choose the forensic family based on access: **static weights** (strongest here) → **forward‑pass features** → **black‑box outputs** → **side‑channels** (usually out of scope unless you’re auditing a deployed API).
