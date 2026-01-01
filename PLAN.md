@@ -113,7 +113,25 @@ Outputs:
 Checklist:
 - Confirm both models are bf16 (`torch_dtype: bfloat16`).
 - Confirm head dimension is 128 (can be inferred from attention weight shapes in other probes).
+- Scan for “lineage breadcrumbs” in `00_config_compare.json`:
+  - GLM‑specific fields present/absent (e.g. `num_nextn_predict_layers`)
+  - closely related flags with different values (e.g. `partial_rotary_factor`, `first_k_dense_replace`)
+- In `01_tokenizer_compare.json`, explicitly check tokenizer *ID* behavior (this determines whether any row‑wise embedding comparisons are meaningful):
+  - `same_id_exact_matches.ratio` (are IDs preserved at all?)
+  - `best_ascii_offset` + `best_offset_longest_contiguous_run.run_len` (is Solar largely a shifted/permuted GLM vocab?)
+  - Special token IDs (`pad_token_id`, `bos_token_id`, `eos_token_id`) from `00_config_compare.json`
 - Record the exact model revisions used (the scripts default to `main`; for strict reproducibility, rerun with a pinned `--revision`/commit hash).
+
+### Experiment 1b — Embedding comparison for shared tokens (don’t assume stable IDs)
+
+Goal: test whether embeddings for the **same token text** are related across models (and detect “ID‑shift/permutation” effects).
+
+Run:
+- `python sionic-ai--solar-vs-glm/compare_embeddings.py --max_tokens 500 --out_dir "$OUTDIR/01_embeddings"`
+
+Interpretation:
+- If token IDs are not preserved, comparing “row 1234 vs row 1234” is meaningless; compare by token text → this script does that.
+- If many shared tokens have highly correlated embeddings (after mapping), that’s evidence of reuse/initialization; if they look random, that supports retraining / re‑indexing.
 
 ### Experiment 1 — Reproduce the headline plot: layerwise norms + router/gate
 
@@ -161,6 +179,10 @@ Then improve it (recommended):
 - expand beyond “first 20 tensors”
 - test multiple random contiguous byte blocks for each candidate tensor
 - cover more tensor families with identical shapes (norms, router weights, biases, etc.)
+- Optional “outlier fingerprint” (useful if you want a human‑interpretable hard signal):
+  - For a given GLM LayerNorm vector, find the top‑K most extreme coordinates (largest `abs(x-mean)`).
+  - Check whether Solar’s corresponding vector has the **same BF16 values at the same indices** across multiple layers.
+  - Multiple exact coordinate/value matches on rare outliers is very hard to explain by chance.
 
 Interpretation notes:
 - **Positive match:** extremely strong evidence.
@@ -180,6 +202,7 @@ Ways to do it:
 Quantify it (useful “Claude plan” additions):
 - **Alignment rate**: fraction of Solar layers whose best match is GLM layer `L` (account for Solar’s extra +2 layers).
 - **Margin**: `(best_sim - second_best_sim)` per Solar layer; small margins indicate “everything is similar”.
+ - Save a heatmap (e.g. `similarity_heatmap.png`) so “sharp diagonal vs diffuse cloud” is visually obvious.
 
 Expected outcomes:
 - If Solar was initialized layer‑wise from GLM, argmax should concentrate strongly on the diagonal (after accounting for Solar’s extra +2 layers).
@@ -195,6 +218,9 @@ Run the window‑sampling probe:
 What this tests:
 - Many projection weights (`q_proj/k_proj/v_proj/o_proj`) are shape‑compatible (or partially compatible via truncation when head counts differ).
 - Whether Solar’s `q_proj` looks like a prefix/truncation of GLM’s (a stronger structural reuse signal than norms).
+
+Optional (Gemini idea; treat as *weak* evidence on its own):
+- Compare per‑layer Frobenius/L2 norms of shape‑compatible tensors (e.g. `k_proj`, `v_proj`, `mlp.gate`) and see if the “norm curve” vs layer index matches unusually well (and does *not* match controls).
 
 ### Experiment 6 — Rebuttal reproduction (Solar vs GLM vs Phi) without massive downloads
 
@@ -231,6 +257,9 @@ Minimal starting scripts to add:
 - `scripts/norm_baselines.py` (baseline distributions + layer alignment matrix across Solar/GLM/Phi)
 - `scripts/byte_match.py` (hash random byte blocks for many tensors)
   - Include: alignment rate + per‑layer margin, plus value‑difference stats (MAD/RMSE/max/percent‑close).
+- Optional add-ons (useful, but not required to start):
+  - `scripts/outlier_fingerprint.py` (find extreme coordinates in GLM vectors and test exact index/value matches in Solar)
+  - `scripts/norm_dynamics.py` (per‑layer weight‑norm “curve” plots for shape‑compatible tensors)
 
 ---
 
