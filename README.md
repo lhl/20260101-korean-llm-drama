@@ -55,6 +55,10 @@ We created a comprehensive plan to independently verify the claims using multipl
 5. CKA fingerprinting (AWM-style)
 6. Intrinsic std-curve fingerprints (LLM-Fingerprint style)
 
+## Discussion
+
+- [r/LocalLLaMA: Upstage Solar-Open-100B public validation](https://www.reddit.com/r/LocalLLaMA/comments/1q0zst6/upstage_solaropen100b_public_validation/) — community discussion with methodological feedback
+
 ## References
 
 See [PLAN.md § Reference Repos](PLAN.md#9-reference-repos-local-copies) for full list of archived sources and papers.
