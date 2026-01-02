@@ -17,7 +17,7 @@ We want to test a spectrum of hypotheses:
 2. **Initialized-from**: Solar started from GLM weights then continued training / modified architecture.
 3. **Independent training**: similarities are due to convergent architecture choices + norm parameter behavior (cosine traps), not shared initialization.
 
-**Important:** LayerNorm/RMSNorm vectors are low‑information and often biased positive; raw cosine similarity can be misleading. Prefer stronger tests (byte identity, permutation/alignment, higher‑dimensional tensors, controls, and “centered” metrics).
+**Important:** LayerNorm/RMSNorm vectors are low‑information and often biased positive; raw cosine similarity can be misleading. Empirically (per community reports), deep-layer RMSNorm cosine can be ~0.99 even across *unrelated* models, so treat “high cosine on norms” as non-actionable unless paired with stronger signals (byte identity, permutation/alignment, higher‑dimensional tensors, controls, and “centered”/difference-based metrics).
 
 ---
 
@@ -206,7 +206,7 @@ Key file:
 - `layerwise_similarity.csv`
 
 What to look for:
-- `cosine` for norms may be high even when `pearson` is near zero → classic “cosine trap” for mostly‑positive vectors.
+- `cosine` for norms may be high even when `pearson` is near zero → classic “cosine trap” for mostly‑positive vectors (and deep-layer norms can be ~0.99 across unrelated models).
 - `router_or_gate` similarities near 0 are expected if routers were independently trained.
 
 Optional:
@@ -215,7 +215,7 @@ Optional:
 
 ### Experiment 2 — Resolve the baseline dispute (the core methodological fight)
 
-Goal: establish whether “Solar vs GLM same‑layer similarity” is **actually** exceptional compared to:
+Goal: establish whether "Solar vs GLM same‑layer similarity" is **actually** exceptional compared to:
 - within‑model similarities across many layer pairs
 - cross‑model similarities to an unrelated control model
 - metrics that remove the +1 bias (`pearson`, centered cosine)
@@ -225,12 +225,28 @@ Run:
 
 Then:
 - Compare **raw cosine** vs **pearson** vs **centered cosine** (see `probe_final.py`).
-- Compute a *distribution* baseline (many random layer pairs), not a single “layer 0 vs layer 10” number.
+- Compute a *distribution* baseline (many random layer pairs), not a single "layer 0 vs layer 10" number.
 - If you extend this yourself, capture **within‑model** layer×layer matrices for both:
   - `input_layernorm.weight`
   - `post_attention_layernorm.weight`
+- Optional sanity calibration (motivated by Reddit-style observations): compare deep-layer norm vectors against at least one unrelated model with the same hidden size (e.g. a 7B 4096-dim dense model) to quantify how often norm cosine saturates near 1.0 in practice.
 
-If this still isn’t enough, write a small dedicated baseline script (recommended next code to write; see section 6).
+**Critical methodological notes from rebuttal (2026-01-02 update):**
+
+1. **Avoid layer 0 as baseline**: The original Sionic analysis compared layer 0 vs layers 10/20/30/40, but layer 0's `input_layernorm` is special—it directly receives embedding input and often has lower cosine similarity with other layers. Comparing layers 10/20/30 within the same model shows ~0.99 cosine similarity.
+
+2. **Separate `input_layernorm` vs `post_attention_layernorm`**: Even at layer 0, `post_attention_layernorm` (which receives normalized input) shows high similarity (~0.92+) with other layers, while `input_layernorm` does not. Treat these tensor families separately.
+
+3. **Centered cosine is the key discriminator**: The rebuttal shows that cross-model centered cosine drops to ~0 while within-model centered cosine remains relatively high (0.4–0.7). This strongly suggests raw cosine is misleading due to the "all positive near 1.0" distribution.
+
+4. **Additional metrics to compute** (from rebuttal `main.py`):
+   - `rel_l2`: relative L2 distance `||a-b||₂ / ||a||₂` (scale-normalized)
+   - `p99_abs_diff`: 99th percentile absolute difference (tail sensitivity)
+   - `cv_diff`: coefficient of variation difference `|std(a)/mean(a) - std(b)/mean(b)|`
+
+5. **Check `k_proj` and `v_proj`**: These have matching shapes across Solar/GLM/Phi (1024×4096) and are higher-information than norms. The rebuttal found no clear derivation pattern on these either.
+
+If this still isn't enough, write a small dedicated baseline script (recommended next code to write; see section 6).
 
 ### Experiment 3 — Strong evidence: byte‑identity tests
 
@@ -295,12 +311,24 @@ Optional (Gemini idea; treat as *weak* evidence on its own):
 The rebuttal repo script `hyunwoongko--solar-vs-glm-vs-phi/main.py` loads full models and uses `trust_remote_code=True`.
 That is usually not feasible for 100B weights on typical machines.
 
+**Rebuttal update (2026-01-02):** The rebuttal has been substantially expanded with:
+- Centered cosine similarity analysis (key finding: cross-model drops to ~0)
+- Additional metrics: `rel_l2`, `p99_abs_diff`, `cv_diff`, Pearson correlation
+- Within-model layer comparisons for layers 10/20/30 (not layer 0)
+- `k_proj`/`v_proj` comparisons (shape-matched at 1024×4096)
+- GPT2 toy experiment (`train_gpt2.py`) demonstrating initialization bias
+
 Preferred approach:
-- re‑implement the rebuttal’s metrics (cosine + mean abs diff + within‑model matrices) using the **same Range tensor‑fetching approach** as the Sionic scripts.
+- re‑implement the rebuttal's metrics (cosine + centered cosine + mean abs diff + rel_l2 + within‑model matrices) using the **same Range tensor‑fetching approach** as the Sionic scripts.
 
 If you *do* run the rebuttal script anyway:
 - expect it to require extremely large resources, or `accelerate` offload configuration
 - treat remote code execution risk accordingly
+
+**Optional: replicate the GPT2 toy experiment** (`hyunwoongko--solar-vs-glm-vs-phi/train_gpt2.py`):
+- This is a small-scale demonstration that ones-init LayerNorm leads to ~0.999 cross-model cosine similarity while random-init leads to ~0 similarity
+- Useful pedagogical evidence that high LayerNorm cosine reflects initialization bias, not model derivation
+- Can run on CPU in minutes
 
 ### Experiment 7 — Intrinsic “std‑curve” fingerprint (LLM‑Fingerprint style)
 
@@ -420,7 +448,7 @@ High confidence **derived/reused**:
 - strong diagonal layer alignment on higher‑dimensional tensors (routers, experts, attention projections where shapes allow), that does *not* appear for control models.
 
 Likely **inconclusive / weak evidence**:
-- only LayerNorm cosine is high, but centered/pearson metrics and control models show similar behavior.
+- only LayerNorm cosine is high (especially in deep layers), but centered/pearson/difference metrics and control models show similar behavior.
 - only “curve similarity” (std/norm dynamics) is high without any harder signals (byte matches, alignment on informative tensors).
 
 High confidence **not supported by weights**:
@@ -440,4 +468,91 @@ Quick decision tree (optional shorthand):
 - Record exactly which tensors and which slices/windows were compared.
 - Keep “architecture similarity” separate from “weight reuse”; similar configs are not proof.
 - Don’t redistribute weights; publish only aggregate stats, hashes, and non‑reconstructive samples.
-- Choose the forensic family based on access: **static weights** (strongest here) → **forward‑pass features** → **black‑box outputs** → **side‑channels** (usually out of scope unless you’re auditing a deployed API).
+- Choose the forensic family based on access: **static weights** (strongest here) → **forward‑pass features** → **black‑box outputs** → **side‑channels** (usually out of scope unless you're auditing a deployed API).
+
+---
+
+## 9) Reference Repos (local copies)
+
+These subfolders contain reference code/data and may be removed in the future:
+
+| Folder | Source | Description |
+|--------|--------|-------------|
+| `sionic-ai--solar-vs-glm/` | https://github.com/sionic-ai/solar-vs-glm | Original analysis claiming Solar derived from GLM (Range-based tensor probing) |
+| `hyunwoongko--solar-vs-glm-vs-phi/` | https://github.com/hyunwoongko/solar-vs-glm-vs-phi | Rebuttal comparing Solar/GLM/Phi LayerNorm similarities |
+| `AWM/` | https://github.com/LUMIA-Group/AWM_Fingerprint | AWM fingerprinting method (CKA + LAP alignment) |
+| `Awesome-LLM-Fingerprinting/` | https://github.com/shaoshuo-ss/Awesome-LLM-Fingerprinting | SoK paper collection on LLM fingerprinting methods |
+| `LLM-Fingerprint2/` | https://github.com/HonestAGI/LLM-Fingerprint | Intrinsic fingerprint via std patterns (reupload; original disappeared) |
+| `True-Story-of-Pangu/` | https://github.com/HW-whistleblower/True-Story-of-Pangu | Huawei Pangu whistleblower account (background context) |
+| `distillation_detection/` | https://github.com/shqii1j/distillation_detection | NeurIPS 2025: Knowledge Distillation Detection for Open-weights Models |
+
+### Papers (reference/)
+
+| File | arXiv | Title |
+|------|-------|-------|
+| `2510.02302v1.pdf` | [2510.02302](https://arxiv.org/abs/2510.02302) | Knowledge Distillation Detection for Open-weights Models (distillation_detection) |
+| `2510.06738v1.pdf` | [2510.06738](https://arxiv.org/abs/2510.06738) | AWM: Accurate Weight-Matrix Fingerprint for LLMs |
+| `2502.00706v2.pdf` | [2502.00706](https://arxiv.org/abs/2502.00706) | (user-added) |
+
+**Recommended papers to add:**
+- [ ] [2507.03014](https://arxiv.org/abs/2507.03014) — Intrinsic Fingerprint of LLMs (LLM-Fingerprint2 paper)
+- [ ] [2508.19843](https://arxiv.org/abs/2508.19843) — SoK: Large Language Model Copyright Auditing via Fingerprinting (Awesome-LLM-Fingerprinting)
+
+### Discussion threads
+
+- [r/LocalLLaMA: Upstage Solar-Open-100B public validation](https://www.reddit.com/r/LocalLLaMA/comments/1q0zst6/upstage_solaropen100b_public_validation/) — community discussion with methodological feedback incorporated into this plan
+
+---
+
+## Addendum A: Rebuttal repo updates (2026-01-02)
+
+The `hyunwoongko--solar-vs-glm-vs-phi/` rebuttal received substantial updates expanding its analysis. Summary of key additions:
+
+### New experiments and findings
+
+1. **Within-model LayerNorm similarity (layers 10/20/30)**
+   - All three models (Solar, GLM, Phi) show ~0.99 cosine similarity between different layers *within* the same model
+   - This contradicts the original Sionic claim that within-model different-layer norms have low similarity
+
+2. **Layer 0 `input_layernorm` is special**
+   - The original Sionic analysis only compared layer 0 vs other layers
+   - Layer 0's `input_layernorm` directly receives embedding input and behaves differently
+   - `post_attention_layernorm` at layer 0 still shows high similarity (~0.92+) with other layers
+   - Verified across multiple models including Qwen3-4B, Qwen3-14B
+
+3. **Centered cosine similarity**
+   - Key discriminator: subtracts mean before computing cosine
+   - Cross-model centered cosine drops to **~0** (near random)
+   - Within-model centered cosine remains **0.4–0.7** (meaningful structure)
+   - Strongly suggests raw cosine is misleading due to "all positive near 1.0" distribution
+
+4. **GPT2 toy experiment (`train_gpt2.py`)**
+   - Trained 4 small GPT2 models with different seeds/data
+   - Ones-init LayerNorm: cross-model cosine = **0.999**
+   - Random-init LayerNorm: cross-model cosine = **~0**
+   - Empirically demonstrates high cosine comes from initialization bias, not derivation
+
+5. **Additional metrics**
+   - Pearson correlation (equivalent to centered cosine)
+   - `rel_l2`: relative L2 distance (scale-normalized)
+   - `p99_abs_diff`: 99th percentile absolute difference (tail sensitivity)
+   - `cv_diff`: coefficient of variation difference
+   - On these metrics, Solar vs GLM is often **not** closer than Phi vs GLM
+
+6. **`k_proj`/`v_proj` analysis**
+   - Shape-matched across all three models (1024×4096)
+   - No clear derivation pattern found on these higher-information tensors
+
+### Rebuttal conclusion
+
+> "Layernorm weight의 cosine 유사도 하나만으로 모델 파생 관계를 주장하는 것은 설득력이 약하며, 최소한 centered cosine(또는 Pearson), 절대/상대 거리 지표까지 함께 보더라도 Solar가 GLM에서 파생되었다고 볼 만한 일관된 근거는 확인되지 않았습니다."
+>
+> (Translation: "Claiming model derivation based solely on LayerNorm cosine similarity is unconvincing, and even when examining centered cosine/Pearson and absolute/relative distance metrics together, no consistent evidence was found that Solar was derived from GLM.")
+
+### Implications for our plan
+
+- **Experiment 2** updated with methodological notes from rebuttal
+- **Experiment 6** updated with new rebuttal content and GPT2 toy experiment option
+- Centered cosine should be treated as primary metric over raw cosine for LayerNorm comparisons
+- Layer 0 should be excluded or treated separately in within-model baselines
+- The higher-dimensional tensors (`k_proj`, `v_proj`, routers) remain the most informative targets

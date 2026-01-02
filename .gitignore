@@ -1,0 +1,20 @@
+# Reference repos (archived in reference/*.tar.zst)
+AWM/
+Awesome-LLM-Fingerprinting/
+LLM-Fingerprint2/
+True-Story-of-Pangu/
+distillation_detection/
+hyunwoongko--solar-vs-glm-vs-phi/
+sionic-ai--solar-vs-glm/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# HuggingFace cache
+.hf_cache/
+
+# Run outputs
+runs/
