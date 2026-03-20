@@ -76,7 +76,7 @@ That is also the cleanest ethical framing here. The core criticism is not "they 
 Below is a critical review of some weight-provenance analyses. Note: these are not comprehensive, just what's I spotted in my feed when I was looking at this.
 
 ### AWM Analysis
-For testing whether `RakutenAI-3.0` uses the DeepSeek-V3 weights (and not just architecture), more analysis is required. Below I am mainly tracking some of the independent research that has popped up in my timeline. The quality varies, so each item should be judged on its own basis.
+For testing whether `RakutenAI-3.0` uses the DeepSeek-V3 weights (and not just architecture), more analysis is required.
 
 AWM ("Accurate Weight-Matrix Fingerprint for Large Language Models") is explicitly framed as a weight-based provenance method that aims to distinguish scratch-trained models from derived models even after post-training steps such as continued pretraining and fine-tuning. Source: [AWM paper](https://arxiv.org/abs/2510.06738)
 
