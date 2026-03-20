@@ -82,6 +82,80 @@ The practical public-evidence hierarchy is:
 - **Strong public indications:** DeepSeek-V3-derived weight lineage with later training.
 - **Still not public:** an official plain-language acknowledgment from Rakuten.
 
+## On The "LoRA" Claim
+
+A March 20, 2026 note article by Hamachi, [RakutenAI-3.0とDeepSeek-V3の関係性について - ほぼLoRA適用モデル](https://note.com/hamachi_jp/n/n5ccfdedd2518), makes very confident "almost LoRA" claims and directly links its code/data basis to the GitHub repo [hama-jp/RakutenAI_Report](https://github.com/hama-jp/RakutenAI_Report). For practical purposes, the note article and the GitHub repo should be treated as the same authored analysis package.
+
+### What that analysis does establish
+
+The article/repo does provide strong evidence that `RakutenAI-3.0` is derived from DeepSeek-V3:
+
+- tokenizer identity;
+- matching `config.json` / architecture;
+- extremely high overall tensor similarity;
+- and a pattern of small differences on top of an overwhelmingly inherited base.
+
+That part is broadly aligned with the rest of the public evidence.
+
+### What the "LoRA" claim seems to be based on
+
+The article's "LoRA" claim appears to rest on a narrower inference:
+
+1. most weights are near-identical to DeepSeek-V3;
+2. the more noticeable differences are said to concentrate in `q_a/q_b/kv_a/kv_b` low-rank attention projection tensors;
+3. DeepSeek's config uses names like `q_lora_rank` and `kv_lora_rank`;
+4. therefore, the author infers something like "DeepSeek-V3 + LoRA-like selective tuning."
+
+That inference is understandable, but it is much stronger than the public evidence actually proves.
+
+### Why this is weaker than it sounds
+
+The main problem is terminological and methodological.
+
+- DeepSeek-V3 already contains those low-rank MLA projection layers as part of the **base architecture**. They are not, by themselves, evidence of externally added LoRA adapters.
+- The linked repo's current README explicitly says this: the relevant layers are **MLA low-rank projection parameters**, not external LoRA adapters.
+- The repo's own `lora_parameter_analysis.py` also says the same thing in plain English: "`lora` in config naming is DeepSeek's convention for MLA ... not the LoRA fine-tuning technique."  
+  Sources: [repo README](https://raw.githubusercontent.com/hama-jp/RakutenAI_Report/main/README.md), [lora_parameter_analysis.py](https://raw.githubusercontent.com/hama-jp/RakutenAI_Report/main/scripts/lora_parameter_analysis.py)
+
+So the strongest source-grounded version of the claim is **not** "Rakuten trained this with LoRA." The stronger claim is only that the observed changes may be concentrated in DeepSeek-V3's built-in low-rank attention projections, which is more like "LoRA-like selective tuning" than proof of standard LoRA training.
+
+### Why the public release does not really prove LoRA
+
+There are also reproducibility gaps in the publicly posted evidence.
+
+- The note article claims `10,929` tensors and `61` layers, but the published CSV in the linked repo currently contains only **10 aggregate rows** for layers `0-9`, not raw per-tensor results for all 61 layers.  
+  Source: [published CSV](https://raw.githubusercontent.com/hama-jp/RakutenAI_Report/main/data/comprehensive_analysis_results.csv)
+- The script marketed as LoRA analysis mostly reads config values and prints theoretical low-rank parameter counts. It does not identify a training recipe.
+- Even if the weight differences really do concentrate in the built-in MLA low-rank factors, that still would not by itself tell us that the actual post-training method was standard LoRA rather than some broader CPT/FT process with heavier updates in those components.
+
+### What the repo history suggests
+
+The commit history of `hama-jp/RakutenAI_Report` also weakens confidence in the article's strongest framing.
+
+- The initial public version described the result as **"LoRA implementation confirmed"** and labeled `_a_proj` / `_b_proj` weights as "LoRA parameters."  
+  Source: [initial README](https://raw.githubusercontent.com/hama-jp/RakutenAI_Report/6e7dc9e/README.md)
+- A later revision explicitly corrected this and stated that these are **DeepSeek-V3's built-in MLA low-rank projection layers**, not external LoRA adapters.  
+  Sources: [commit `4890f85`](https://github.com/hama-jp/RakutenAI_Report/commit/4890f85), [commit `d0a09aa`](https://github.com/hama-jp/RakutenAI_Report/commit/d0a09aa)
+- Shortly after that, the framing was strengthened again to **"LoRA-equivalent cost disguised as independent full model"**, which is rhetorically stronger even though it does not rest on a comparably stronger public demonstration of the actual training recipe.  
+  Source: [commit `981b30f`](https://github.com/hama-jp/RakutenAI_Report/commit/981b30f)
+
+The repo also appears to be substantively Claude-driven. The initial major commit is explicitly marked "Generated with Claude Code" and "Co-Authored-By: Claude," later commits link directly to a Claude Code session, and multiple merges come from a `hama-jp/claude/code-review-...` branch. That does not make the analysis automatically wrong, but it is relevant here because the repo both made and then corrected a basic MLA-vs-LoRA mistake while continuing to escalate the rhetorical framing. Interested readers should inspect the commit log directly rather than relying only on the latest README wording.  
+Source: [commit log](https://github.com/hama-jp/RakutenAI_Report/commits/main/)
+
+That progression does not mean the whole investigation is worthless. It does mean the repo should be read carefully as an evolving public narrative, not as a stable and methodologically settled analysis. The strongest part of the repo is still the derivation evidence. The weakest part is the leap from "differences seem concentrated in MLA low-rank factors" to "therefore this was basically LoRA."
+
+### Better reading
+
+The article is useful as more public evidence for **DeepSeek-V3 derivation**. It is much less convincing as evidence that the training method itself was LoRA.
+
+The cleaner critical reading is:
+
+- **well supported:** DeepSeek-V3-derived model;
+- **plausible:** selective tuning focused heavily on built-in MLA low-rank attention projections;
+- **not well supported:** "therefore the training was LoRA."
+
+While Rakuten has not published a full post-training recipe on top of DeepSeek-V3, a simple LoRA-only explanation looks extremely unlikely. The scale and positioning of the release, the public "now fine-tuned" framing, the broader fingerprint evidence discussed above, and the weakness of the article's own methodological basis all point away from a narrow "it was basically just LoRA" story.
+
 ## Independent Fingerprints Beyond AWM
 
 Another useful community line of evidence comes from a March 2026 thread by [@odashi_t](https://x.com/odashi_t/status/2034557954331181528). Based on the reported results in that thread and follow-up discussion:
