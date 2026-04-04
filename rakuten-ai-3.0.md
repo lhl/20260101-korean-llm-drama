@@ -251,3 +251,49 @@ The cleanest reading of the public record is:
 5. The public evidence is therefore best read as pointing to a DeepSeek-V3-derived CPT/FT lineage, even if Rakuten's external wording remains vague.
 6. The real public problem is bad framing and incomplete attribution, not the mere fact of building on an upstream open model.
 7. Unlike the Solar/GLM dispute, no public AWM run or similar higher-information fingerprint seems to have been central to the earlier Korean controversy.
+
+
+## Addendum: GENIAC Public Proposal vs. Actual Release
+
+Since Rakuten's model card and press release were light on technical details, it is useful to look at publicly available government documents for additional context on what Rakuten proposed for the GENIAC Phase 3 program. Archived copies of the sources below are in [`reference-rakuten/`](reference-rakuten/).
+
+### Source 1: NEDO Official Adoption Documents
+
+Rakuten's participation in GENIAC Phase 3 is documented in NEDO's official adoption results. The project title, as listed in the official participant list (資料1), is:
+
+> **長期記憶メカニズムと対話型学習を融合した最先端の生成AI基盤モデルの研究開発**
+>
+> (R&D of cutting-edge generative AI foundation models fusing long-term memory mechanisms with interactive learning)
+
+**Citation:** 資料1「採択テーマ一覧」, entry #23, published by NEDO  
+**URL:** https://www.nedo.go.jp/content/800028443.pdf  
+**Linked from:** [NEDO adoption results page](https://www.nedo.go.jp/koubo/CD3_100397.html), also referenced from [METI GENIAC Phase 3 selection page](https://www.meti.go.jp/policy/mono_info_service/geniac/selection_3/index.html)
+
+A more detailed project description appears in the companion document 資料3「テーマ概要」(Resource 3: Theme Overview), page 23.
+
+**Citation:** 資料3「テーマ概要」, p.23, published July 15, 2025 by NEDO  
+**URL:** https://www.nedo.go.jp/content/800028445.pdf (p.23)
+
+### Source 2: METI Kickoff Event Report — Direct Quote from Rakuten Representative
+
+The strongest first-party source is a direct quote from Rakuten's representative (平手氏 / Hirate-shi) at the GENIAC Phase 3 kickoff event on July 15, 2025, published on the METI (Ministry of Economy, Trade and Industry) website:
+
+> 「日本語と日本文化に最適化された独自LLMの研究開発を進めています。従来のTransformer型LLMが抱える高コストや長文処理の限界を克服するため、『Factorization Memory』を採用した次世代モデルを構築しています。長期記憶と対話型学習の融合により、楽天エコシステム全体におけるAIエージェントの展開を視野に入れています」（平手氏）
+
+**Translation:**
+
+> "We are advancing R&D on a proprietary LLM optimized for the Japanese language and Japanese culture. To overcome the high costs and long-text processing limitations of conventional Transformer-based LLMs, we are building a next-generation model adopting 'Factorization Memory.' Through the fusion of long-term memory and interactive learning, we have in view the deployment of AI agents across the entire Rakuten ecosystem." — (Hirate)
+
+**Citation:** 「GENIAC第3期のキックオフイベントが開催されました！【前編】」, METI (経済産業省), published August 29, 2025  
+**URL:** https://www.meti.go.jp/policy/mono_info_service/geniac/geniac_magazine/kickoffevents_3_1.html
+
+### The Contrast
+
+This is a public, first-party statement on a government website, from a named Rakuten representative, at an official event, made approximately 8 months before the RakutenAI-3.0 release. The claims are specific and architectural:
+
+1. **「独自LLM」(proprietary LLM)** — not a fine-tune of an existing model.
+2. **「従来のTransformer型LLMが抱える高コストや長文処理の限界を克服」(overcoming limitations of conventional Transformer LLMs)** — implies architectural innovation beyond standard Transformers.
+3. **「Factorization Memory を採用した次世代モデル」(next-generation model adopting Factorization Memory)** — a specific named architectural component.
+4. **「構築しています」(we are building)** — present progressive, active development.
+
+It's worth noting that we do not have final presentations, and we are viewing this only from the context of a publicly released model — this does not account for the Rakuten AI 3.0 proprietary service that launched, nor any internal pivoting or scope changes presented to GENIAC. However, at least some of these claims seem at odds with what has been released so far.
